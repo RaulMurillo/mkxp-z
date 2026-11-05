@@ -1124,7 +1124,7 @@ if not fluidsynth.found()
         'enable-framework': false,
         'enable-dart': false,
         'enable-kai': false,
-        'osal': 'embedded',
+        'osal': 'cpp11',
     })
     foreach opt, val : cmake_override_options
         fluidsynth_options.set_override_option(opt, val)
