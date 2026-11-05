@@ -38,6 +38,14 @@ Scene::~Scene()
 
 void Scene::insert(SceneElement &element)
 {
+	SceneElement *tail = elements.tail();
+
+	if (!tail || !(element < *tail))
+	{
+		elements.append(element.link);
+		return;
+	}
+
 	IntruListLink<SceneElement> *iter;
 
 	for (iter = elements.begin(); iter != elements.end(); iter = iter->next)
