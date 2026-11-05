@@ -1,0 +1,14 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -937,7 +937,10 @@
+ # Process subdirectories
+ add_subdirectory ( src )
+-add_subdirectory ( test )
++option ( BUILD_TESTING "Build FluidSynth tests" ON )
++if ( BUILD_TESTING )
++    add_subdirectory ( test )
++endif ()
+ add_subdirectory ( doc )
+ 
+ # pkg-config support
+ set ( prefix "${CMAKE_INSTALL_PREFIX}" )

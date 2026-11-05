@@ -1089,7 +1089,9 @@ if not fluidsynth.found()
         'CMAKE_C_FLAGS': run_command(quotetool, fluidsynth_internal_cflags + fluidsynth_external_cflags, check: true).stdout().strip(),
         'CMAKE_CXX_FLAGS': run_command(quotetool, fluidsynth_internal_cflags + fluidsynth_external_cflags, check: true).stdout().strip(),
         'GCEM_INCLUDE_DIR': gcem_include_dir,
+        'CMAKE_CXX_STANDARD': '17',
         'BUILD_SHARED_LIBS': false,
+        'BUILD_TESTING': false,
         'enable-alsa': false,
         'enable-aufile': false,
         'enable-dbus': false,
@@ -1114,6 +1116,8 @@ if not fluidsynth.found()
         'enable-openmp': false,
         'enable-unicode': false,
         'enable-native-dls': false,
+        # Release archives do not include the Signalsmith submodule.
+        'enable-signalsmith': false,
         'enable-systemd': false,
         'enable-coreaudio': false,
         'enable-coremidi': false,
@@ -1125,6 +1129,7 @@ if not fluidsynth.found()
     foreach opt, val : cmake_override_options
         fluidsynth_options.set_override_option(opt, val)
     endforeach
+    fluidsynth_options.set_override_option('cpp_std', 'c++17')
     fluidsynth = cmake.subproject('fluidsynth', options: fluidsynth_options).dependency('libfluidsynth')
     meson.override_dependency('fluidsynth', fluidsynth, static: true)
 endif
