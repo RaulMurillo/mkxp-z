@@ -1193,8 +1193,13 @@ if not ruby.found()
         'cppflags': run_command(quotetool, ruby_internal_cflags + ruby_external_cflags, check: true).stdout().strip(),
         'ldflags': run_command(quotetool, ruby_internal_ldflags + ruby_external_ldflags, check: true).stdout().strip()
     }
-    ruby = subproject('ruby-' + get_option('mri_version'), default_options: ruby_options).get_variable('ruby')
-    ruby_build_dir = subproject('ruby-' + get_option('mri_version'), default_options: ruby_options).get_variable('ruby_build_dir')
+    ruby_project = subproject('ruby-' + get_option('mri_version'), default_options: ruby_options)
+    ruby = ruby_project.get_variable('ruby')
+    ruby_build_dir = ruby_project.get_variable('ruby_build_dir')
+    ruby_stdlib_dir = ruby_project.get_variable(
+        'ruby_stdlib_dir',
+        ruby_build_dir / 'dist' / 'lib' / 'ruby' / (get_option('mri_version') + '.0'),
+    )
 endif
 global_dependencies += ruby
 

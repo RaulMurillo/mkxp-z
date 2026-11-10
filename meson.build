@@ -227,7 +227,7 @@ foreach install_tag : global_install_tags
     if ruby.type_name() == 'internal'
         meson.add_install_script(
             common.get_variable('install_directory'),
-            ruby_build_dir / 'dist' / 'lib' / 'ruby' / (get_option('mri_version') + '.0'),
+            ruby_stdlib_dir,
             'stdlib',
             install_tag: install_tag,
         )

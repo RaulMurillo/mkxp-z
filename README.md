@@ -25,6 +25,13 @@ mkxp-z is licensed under the GNU General Public License v2+. However, if you bui
 ## Bindings
 Bindings provide the glue code for an interpreted language environment to run game scripts in. mkxp-z focuses on MRI and as such the mruby and null bindings are not included.
 
+The default vendored Ruby remains 3.1. Experimental alternatives are selected
+with `-Dmri_version=3.4` or `-Dmri_version=4.1`; the latter pins
+Ruby 4.1.0-preview1 and disables YJIT/ZJIT. Upstream's Windows YJIT support
+requires MSVC, not the MinGW toolchain used here. See the
+[porting record](./RUBY_3_4_PORTING.md#10-port-experimental-a-ruby-410-preview1)
+for build instructions, compatibility limits and pending checks.
+
 ## Midi music
 
 mkxp doesn't come with a soundfont by default, so you will have to supply it yourself (set its path in the config). Playback has been tested and should work reasonably well with all RTP assets.

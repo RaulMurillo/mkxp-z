@@ -268,8 +268,10 @@ El helper conserva logs y opciones en el directorio de build. Su
 `source-changes.patch` solo contiene cambios de archivos seguidos por Git.
 Las candidatas iniciales se construyeron cuando el port aún no estaba
 versionado, por lo que ese parche y el commit base no identifican por sí
-solos su fuente completa. En futuras builds, registrar el commit actual y
-conservar aparte los archivos nuevos sin seguimiento.
+solos su fuente completa. En builds posteriores el helper guarda también
+`source-untracked.tar.gz`, con wraps y parches de `subprojects/` y archivos
+de `subprojects/packagefiles/` sin seguimiento, incluidos los ignorados en
+esas rutas. No incluye otros archivos sin seguimiento.
 
 ## 7. Distribución y comprobaciones manuales
 
@@ -292,10 +294,12 @@ conservar aparte los archivos nuevos sin seguimiento.
   En la prueba anterior se apartaron la stdlib y el exe como
   `stdlib-ruby3.1` y `Game-ruby3.1.exe`; el helper no crea esas copias.
 - La creación de candidatas de `../update_mkxp.sh` copia primero el juego y
-  luego superpone `stdlib/` sin eliminar archivos sobrantes. Su modo `--deploy`
-  también superpone la stdlib en el juego, aunque crea antes un backup completo
-  del juego. Si ya hay una stdlib anterior, comprobar que no queden archivos
-  mezclados antes de usar la candidata o desplegarla.
+  sincroniza `stdlib/` con el artefacto, eliminando archivos sobrantes de la
+  candidata. Si era un enlace simbólico, lo retira de la copia sin seguirlo.
+  Meson reutiliza el directorio del artefacto, por lo que también hay que
+  comprobar que su stdlib corresponda a la versión compilada. El modo
+  `--deploy` todavía superpone la stdlib en el juego, aunque crea antes un
+  backup completo; comprobar que no queden archivos mezclados al desplegar.
 - La línea antigua que añade `Data/Ruby Library 3.3.0` al load path no se
   modificó. Se añade al final y puede proporcionar bibliotecas que no estén
   presentes antes en el load path. Su retirada y la revisión de JSON quedan
@@ -428,3 +432,224 @@ Las cargas tienen cantidades fijas, pero no son estrictamente deterministas:
 crear Pokémon consume aleatoriedad y compilar el guardado depende del estado
 de la partida. Repetir desde una copia inicial común y no guardar sobre la
 única partida original después de las pruebas.
+
+## 10. Port experimental a Ruby 4.1.0-preview1
+
+### Control y alcance
+
+Trabajo iniciado el 10 de noviembre de 2026 en `deps/ruby-4.1`, desde
+`deps/ruby-3.4` (`15ccd23483b6c341232467a6413dd1b697bdd2b2`).
+El repositorio anidado solo tenía `mkxp-z.wiki/` sin seguimiento. Los cambios
+locales del repositorio padre no forman parte del port.
+
+La versión objetivo es **4.1.0-preview1**, no una versión estable. Ruby 3.1
+continúa siendo el valor predeterminado; Ruby 3.4 conserva su integración.
+El alcance es analizar, editar y compilar: no ejecutar el juego, copiar una
+candidata sobre él, hacer commit, push ni desplegar.
+
+Fuente oficial y checksum comprobado:
+
+```text
+https://cache.ruby-lang.org/pub/ruby/4.1/ruby-4.1.0-preview1.tar.gz
+SHA-256: fb530bb88e90de3ae91c1310a27ae090e6bd989b8726de50ef12a890a85b88ef
+```
+
+### Integración y diferencias con 3.4
+
+- [ruby-4.1.wrap](./subprojects/ruby-4.1.wrap) fija la versión preliminar.
+- [packagefiles/ruby-4.1](./subprojects/packagefiles/ruby-4.1/) contiene la
+  integración Meson, los mismos helpers de construcción de 3.4 y un
+  `configure` regenerado con Autoconf 2.71. No requiere instalar Autoconf
+  para consumir el wrap.
+- [ruby-4.1-mkxp.patch](./subprojects/packagefiles/ruby-4.1-mkxp.patch)
+  reúne los parches de construcción y de semántica del VM adaptados. Se
+  comprobó su aplicación sin fuzz sobre una extracción limpia.
+- Se conservan los bypass de visibilidad, `Symbol#to_proc`/`public_send`,
+  superclass mismatch del VM y el override de `rb_define_class` de nivel
+  superior. Esta última ruta pasó a `rb_define_class_id_under_no_pin`;
+  el port separa su implementación para limitar el override a
+  `rb_define_class`. Retira la nueva macro que omitía esa función; las
+  APIs `_under` mantienen sus comprobaciones.
+- `ractor_check_ints` ya no existe: no se traslada su workaround GCC
+  `__noipa__` a otra función sin evidencia de un fallo.
+- `rb_w32_start_process`, usado por el worker RJIT, tampoco existe.
+  Su parche `CREATE_NO_WINDOW` no se aplica a otras rutas de `Process.spawn`.
+- Monitor y Pathname pasan al core; Fiddle y win32ole son bundled gems.
+  Ninguno conserva el archivo `.a` anterior bajo `ext/`, por lo que se
+  retiran esos cuatro archivos del enlace. Como en 3.4, no se instalan
+  bundled gems: Fiddle y win32ole no se distribuyen en este runtime mínimo.
+  Los juegos que los requieran deben revisar sus dependencias y las ABI
+  de sus extensiones nativas. Win32API sigue usando MiniFFI del motor.
+- `io/wait` también está integrado en el core, que registra sus nombres de
+  carga. Se retira `ext/io/wait/wait.a` del enlace; no existe en 4.1.
+- Se añaden los archivos estáticos de `digest/blake3` y `digest/crc32`,
+  nuevos en 4.1 y referenciados por su inicializador de extensiones.
+- El tarball oficial incluye gems desempaquetadas en `.bundle`, a diferencia
+  del archivo Git usado en 3.4. Vaciar `gems/bundled_gems` no evita que las
+  plantillas nuevas intenten compilarlas. Se excluyen también de
+  `configure-ext.mk.tmpl` y `exts.mk.tmpl`, incluso si existen makefiles
+  antiguos. El primer intento enlazó bigdecimal/debug contra Ruby estático
+  y falló con `undefined reference to lgamma_r`; esas extensiones dinámicas
+  no forman parte del runtime mínimo ni se distribuyen.
+- El baseruby Linux disponible es 3.2.3. La instalación con el `monitor.rb`
+  de Ruby 4.1 falló porque ese archivo espera que `Monitor` exista en el core.
+  La integración precarga el `monitor.rb` del anfitrión mediante su ruta
+  absoluta, obtenida con el `RbConfig` del anfitrión antes de aplicar
+  `-fake.rb`. Esto afecta a las herramientas de construcción, no al juego.
+- La stdlib de esta preview se instala en **`4.1.0+5`**, no `4.1.0`.
+  El subproyecto expone `ruby_stdlib_dir`; el instalador principal lo
+  consulta y conserva la ruta anterior como valor predeterminado para
+  otros subproyectos.
+- Se conserva el control Windows x64, MinGW GCC 13 Win32, `release`,
+  `-O3`, LTO y Ruby estático. También conserva `stack_protector=no` del
+  control 3.4 para no añadir `libssp-0.dll`; no es una mejora de seguridad.
+
+### YJIT: soporte de Windows no equivale a soporte de MinGW
+
+El [anuncio oficial de Ruby 4.1.0-preview1](https://www.ruby-lang.org/en/news/2026/10/12/ruby-4-1-0-preview1-released/)
+anuncia YJIT para Windows. La fuente de esta versión, en `configure.ac`,
+rechaza explícitamente habilitarlo en MinGW:
+
+```text
+YJIT is not supported on mingw. Use win32\configure.bat --enable-yjit on mswin instead
+```
+
+Este port pasa `--disable-yjit --disable-zjit` explícitamente. Instalar Rust
+o activar `YJITEnable` no resuelve esa incompatibilidad. No se ha eliminado
+la comprobación upstream ni se ha cambiado silenciosamente a MSVC.
+
+Una candidata Windows con YJIT necesita otra integración: MSVC, Rust para
+el destino correspondiente, dependencias con CRT/ABI compatibles y enlace
+de los archivos del JIT. También habría que revisar que el código generado
+por YJIT respete los cambios de semántica del VM propios de MKXP-Z.
+
+### Compilar sin ejecutar ni preparar una copia del juego
+
+Desde la raíz de este repositorio MKXP-Z, con Meson y MinGW disponibles:
+
+```bash
+BUILD="$HOME/.cache/la-base-de-sky/mkxp-z/windows-x86_64-release-ruby4.1"
+meson setup "$BUILD" . \
+  --prefix "$BUILD/artifact" \
+  --cross-file windows/meson-gcc-x86_64.txt \
+  --buildtype release -Dstrip=true -Db_lto=true \
+  -Dmri_version=4.1 -Ddefault_system=disabled
+MESON_NUM_PROCESSES=2 meson compile -C "$BUILD" -j 2
+meson install -C "$BUILD" --no-rebuild --tags mkxp-z
+```
+
+La instalación de Meson se limita al prefijo externo. El helper del
+repositorio padre también permite compilar sin preparar una copia del juego:
+
+```bash
+bash ../update_mkxp.sh --ruby 4.1 --jobs 2 --build-only
+```
+
+`--jobs` limita tanto Ninja como los proyectos externos de Meson. Sin
+`--build-only`, el helper prepara una copia candidata. No mezclar la stdlib
+4.1 con la de otras versiones.
+
+### Resultado de compilación e inspección estática
+
+Compilación, enlace e instalación completados el 10 de noviembre de 2026.
+La candidata está en
+`~/.cache/la-base-de-sky/mkxp-z/windows-x86_64-release-ruby4.1/artifact/`.
+No se ejecutó el binario ni se desplegó al juego.
+
+- `mkxp-z.x86_64.exe`: PE32+ GUI x86-64, release, O3, LTO y strip.
+- Versión encontrada en las cadenas del ejecutable:
+  `ruby 4.1.0preview1 (2026-10-11 master 2d08b5f42f) [x64-mingw64]`.
+- SHA-256 del ejecutable instalado:
+  `5c00f5a09bf94eb817e2c65f114b1fb7575f94436d378d5ccbfcfb361699b03f`.
+- Configuración generada: `RUBY_ABI_VERSION=5`, `USE_YJIT=0`,
+  `USE_ZJIT=0`. La stdlib se instala desde `4.1.0+5` a `artifact/stdlib`.
+- Los 18 imports DLL del PE son bibliotecas de Windows; no importa una
+  DLL de Ruby ni otra DLL no sistema. Esto no comprueba cargas dinámicas
+  mediante `LoadLibrary`, servicios del sistema ni disponibilidad en todas
+  las versiones de Windows.
+- Los 29 archivos estáticos de extensiones construidos están contemplados
+  en el enlace. El wrap se reconstruyó desde el tarball verificado: los
+  parches se aplicaron sin fuzz ni offsets y sus 26 fuentes, junto a los
+  overlays, coincidieron con las fuentes usadas en la compilación.
+- Se conservan fuera del juego los logs, opciones de Meson, diff del
+  control, archivo de packagefiles nuevos y manifiestos de hashes. Son
+  cambios sin commit sobre `15ccd23`; el hash Git por sí solo no identifica
+  esta candidata.
+
+La compilación tiene advertencias GCC/LTO: ODR en SPIRV-Headers y posibles
+accesos fuera de límites en Ruby (`regparse.c`, SHA1), FreeType y libjxl.
+No se han silenciado ni determinado aquí si son falsos positivos. No se
+presenta como una build sin advertencias ni validada en ejecución.
+
+Los hashes del ejecutable y configuración originales del juego siguen
+iguales a los registrados al inicio. No se modificaron sus archivos ni
+los cambios locales ajenos del repositorio padre.
+
+El ejecutable 3.4 disponible previamente procede de otra captura de fuentes
+(`f02d586...` con el port entonces sin seguimiento), no de una reconstrucción
+exacta del control actual. Para una comparación atribuible al cambio de Ruby,
+reconstruir también el control `15ccd23` con las mismas opciones.
+
+### Arranque en Windows: `Errno::EBADF` con msvcrt
+
+Síntoma de la primera candidata: el juego se cerraba a los pocos segundos sin
+`errorlog.txt` y en modo debug quedaba en negro. Con trazas temporales en el
+binding (ya retiradas) Ruby inicializaba bien y el fallo aparecía al leer el
+primer archivo de `Data/Scripts`:
+
+```text
+000:Main:29:in 'IO#read': Bad file descriptor @ io_fread - Data/Scripts/001_Settings/002_Settings.rb (Errno::EBADF)
+```
+
+Causa: la build enlaza `msvcrt.dll` (`RUBY_MSVCRT_VERSION 60`, igual que 3.1 y
+3.4), pero Ruby 4 eliminó de `win32/win32.c` las ramas para msvcrt y asume
+UCRT: busca `__pioinfo` en `ucrtbase.dll` y usa la estructura `ioinfo` de UCRT,
+así que cualquier descriptor abierto resulta inválido.
+
+Solución: `ruby-4.1-mkxp.patch` restaura en `win32/win32.c` las ramas de 3.4
+(`FILE`, `ioinfo` heredado, `__pioinfo` importado de msvcrt, `IOINFO_L2E 5` y
+sin búsqueda en `ucrtbase`). Con UCRT el código no cambia. El EXE importa
+`__pioinfo` de `msvcrt.dll`. Validado por el usuario en Windows: el juego
+arranca.
+
+Notas para depurar arranques:
+
+- Sin `winConsole`, el binding redirige `$stdout`/`$stderr` a `NUL`; arrancar
+  con `MKXPZ_WINDOWS_CONSOLE=1` o con el argumento `debug` para ver la salida.
+- El `errorlog.txt` de Essentials se escribe en `System.data_directory`
+  (`%APPDATA%\<título>\`), no junto al EXE.
+- `PluginManager.error` termina con `Kernel.exit!`, sin errorlog.
+- El `preload.rb` del juego llama a `MKXP.puts`, por lo que necesita antes el
+  wrapper del motor:
+
+```json
+"rubyLoadpath": [".", "stdlib", "stdlib/x64-mingw64"],
+"preloadScript": ["scripts/preload/mkxp_wrap.rb", "preload.rb"]
+```
+
+### Rendimiento y comprobaciones pendientes
+
+**Hechos:** actualizar el intérprete cambia VM, GC y bibliotecas. El
+anuncio y la fuente describen mejoras del GC; no son mediciones de
+Essentials. Esta build no incorpora YJIT.
+
+**Hipótesis:** un JIT soportado podría acelerar bucles Ruby calientes.
+Las llamadas frecuentes a C++, las transferencias GPU, esperas, audio y
+sincronización pueden limitar la ganancia. Un intérprete más nuevo
+también puede rendir peor; las mediciones previas de 3.4 siguen siendo
+relevantes como advertencia, no como pronóstico de 4.1.
+
+**Pendiente de prueba manual por el usuario**, en una copia separada y con
+backup independiente de las partidas externas:
+
+1. Confirmar `RUBY_DESCRIPTION`, stdlib y ausencia de JIT; revisar los logs.
+2. Cargar partida, recorrer mapas y eventos, abrir menús y entrar en combate.
+3. Comprobar gráficos, audio, plugins, dependencias Ruby y extensiones nativas.
+4. Guardar y recargar la copia de prueba; comprobar compatibilidad de Marshal.
+5. Alternar control 3.4 y candidata 4.1 desde los mismos datos, configuración
+   y estado inicial. Registrar calentamiento, medianas, dispersión y memoria.
+
+Compilar e inspeccionar un PE no demuestra compatibilidad funcional ni
+mejora de FPS. Para volver al control de fuentes, conservar primero el
+diff y los packagefiles nuevos y regresar a `deps/ruby-3.4`; no es necesario
+restaurar el juego porque no se despliega este port.

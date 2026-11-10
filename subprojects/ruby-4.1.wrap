@@ -1,0 +1,9 @@
+[wrap-file]
+source_url = https://cache.ruby-lang.org/pub/ruby/4.1/ruby-4.1.0-preview1.tar.gz
+source_filename = ruby-4.1.0-preview1.tar.gz
+source_hash = fb530bb88e90de3ae91c1310a27ae090e6bd989b8726de50ef12a890a85b88ef
+directory = ruby-4.1.0-preview1
+patch_directory = ruby-4.1
+diff_files =
+    ruby-4.1-mkxp.patch,
+    end-of-diff-files.patch
