@@ -1,0 +1,33 @@
+# Enables verbose mode when building Ruby so that we can see the exact commands it uses in the build logs.
+
+diff --git a/common.mk b/common.mk
+index d3e7cfe..4ba905d 100644
+--- a/common.mk
++++ b/common.mk
+@@ -9,7 +9,7 @@ dll: $(LIBRUBY_SO)
+ .SUFFIXES: .rbinc .rbbin .rb .inc .h .c .y .i .$(ASMEXT) .$(DTRACE_EXT)
+ 
+ # V=0 quiet, V=1 verbose.  other values don't work.
+-V = 0
++V = 1
+ V0 = $(V:0=)
+ Q1 = $(V:1=)
+ Q = $(Q1:0=@)
+@@ -295,7 +295,7 @@ GOLFPRELUDES  = golf_prelude.rbbin
+ SCRIPT_ARGS   =	--dest-dir="$(DESTDIR)" \
+ 		--extout="$(EXTOUT)" \
+ 		--ext-build-dir="./ext" \
+-		--mflags="$(MFLAGS)" \
++		--mflags="$(MFLAGS) V=$(V)" \
+ 		--make-flags="$(MAKEFLAGS)"
+ EXTMK_ARGS    =	$(SCRIPT_ARGS) --extension $(EXTS) --extstatic $(EXTSTATIC) \
+ 		--make-flags="V=$(V) MINIRUBY='$(MINIRUBY)'" \
+@@ -414,7 +414,7 @@ configure-ext: $(EXTS_MK)
+ build-ext: $(EXTS_MK)
+ 	$(Q)$(MAKE) -f $(EXTS_MK) $(mflags) libdir="$(libdir)" LIBRUBY_EXTS=$(LIBRUBY_EXTS) \
+ 	    EXTENCS="$(ENCOBJS)" BASERUBY="$(BASERUBY)" MINIRUBY="$(MINIRUBY)" \
+-	    $(EXTSTATIC)
++	    V=$(V) $(EXTSTATIC)
+ 	$(Q)$(MAKE) $(EXTS_NOTE)
+ 
+ exts-note: $(EXTS_MK)

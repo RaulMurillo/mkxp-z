@@ -1,0 +1,16 @@
+# The socket extension attempts to patch /usr/include/netinet6/in6.h when building for Apple platforms under certain circumstances.
+# This file doesn't exist in certain versions of macOS, causing the socket extension to fail to build, so this patch disables the patching of the header file.
+
+diff --git a/ext/socket/extconf.rb b/ext/socket/extconf.rb
+index a814e21..bc5db8c 100644
+--- a/ext/socket/extconf.rb
++++ b/ext/socket/extconf.rb
+@@ -670,7 +670,7 @@ def %(s) s || self end
+   end
+ 
+   hdr = "netinet6/in6.h"
+-  /darwin/ =~ RUBY_PLATFORM and
++  false and
+   checking_for("if apple's #{hdr} needs s6_addr patch") {!try_compile(<<"SRC", nil, :werror=>true)} and
+ #include <netinet/in.h>
+ int t(struct in6_addr *addr) {return IN6_IS_ADDR_UNSPECIFIED(addr);}

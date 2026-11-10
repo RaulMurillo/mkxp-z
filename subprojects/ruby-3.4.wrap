@@ -1,0 +1,30 @@
+[wrap-file]
+source_url = https://github.com/ruby/ruby/archive/refs/tags/v3_4_12.tar.gz
+source_filename = ruby-3_4_12.tar.gz
+source_hash = bf8a420cf41b56354d2e5f3e8effb1c0e03552854bc987d657256969ef116efb
+directory = ruby-3_4_12
+patch_directory = ruby-3.4
+diff_files =
+    ruby-3.4-alignof.patch,
+    ruby-3.4-bsd.patch,
+    ruby-3.4-bundle.patch,
+    ruby-3.4-darwin-in6.patch,
+    ruby-3.4-deps.patch,
+    ruby-3.4-disable-lto-for-link-tests.patch,
+    ruby-3.4-dllexport.patch,
+    ruby-3.4-exp.patch,
+    ruby-3.4-fake.patch,
+    ruby-3.4-init.patch,
+    ruby-3.4-libruby-static.patch,
+    ruby-3.4-libs.patch,
+    ruby-3.4-pkg-config.patch,
+    ruby-3.4-program.patch,
+    ruby-3.4-rbinstall.patch,
+    ruby-3.4-reconfig.patch,
+    ruby-3.4-verbose.patch,
+    ruby-3.4-win32-winnt.patch,
+    ruby-3.4-windows-builtin-setjmp.patch,
+    ruby-3.4-mkxp-z-patches-windows-libs.patch,
+    ruby-3.4-mkxp-z-patches.patch,
+    ruby-3.4-gcc-lto-setjmp.patch,
+    end-of-diff-files.patch

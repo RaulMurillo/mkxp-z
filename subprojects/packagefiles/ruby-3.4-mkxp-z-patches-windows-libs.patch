@@ -1,0 +1,15 @@
+# Statically links libpthread (and libgcc if it exists, since Clang does not have libgcc) into Windows builds.
+
+diff --git a/configure.ac b/configure.ac
+index aa12f74..7af53a7 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1218,7 +1218,7 @@ main()
+ 		AC_CHECK_FUNCS(cygwin_conv_path)
+ 		AC_LIBOBJ([langinfo])
+ 		],
+-[mingw*], [	LIBS="-lshell32 -lws2_32 -liphlpapi -limagehlp -lshlwapi -lbcrypt $LIBS"
++[mingw*], [	LIBS="-lshell32 -lws2_32 -liphlpapi -limagehlp -lshlwapi -lbcrypt -Wl,-Bstatic $MKXP_LIBGCC -lpthread -Wl,-Bdynamic $LIBS"
+ 		ac_cv_header_pwd_h=no
+ 		ac_cv_header_utime_h=no
+ 		ac_cv_header_sys_ioctl_h=no

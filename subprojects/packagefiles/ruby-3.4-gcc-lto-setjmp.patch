@@ -1,0 +1,17 @@
+# Prevents GCC from cloning ractor_check_ints() during interprocedural optimization.
+# With LTO enabled, GCC 13 crashes with "internal compiler error: SSA corruption" when it clones this function, which calls setjmp().
+
+diff --git a/ractor.c b/ractor.c
+index f45c6fe..c2d5f41 100644
+--- a/ractor.c
++++ b/ractor.c
+@@ -590,6 +590,9 @@ ractor_sleep_interrupt(void *ptr)
+ 
+ typedef void (*ractor_sleep_cleanup_function)(rb_ractor_t *cr, void *p);
+ 
++#if defined(__GNUC__) && !defined(__clang__)
++__attribute__((__noipa__))
++#endif
+ static void
+ ractor_check_ints(rb_execution_context_t *ec, rb_ractor_t *cr, ractor_sleep_cleanup_function cf_func, void *cf_data)
+ {

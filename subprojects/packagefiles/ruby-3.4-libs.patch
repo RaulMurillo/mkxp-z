@@ -1,0 +1,32 @@
+# Moves the inclusion of libcrypt and zlib to the end of configure.ac so that Ruby's configure tests don't try to use libcrypt and zlib (since these two libraries may not exist at configure time).
+
+diff --git a/configure.ac b/configure.ac
+index 0f9c6b5..94f1f00 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1343,7 +1343,7 @@ AS_IF([test -n "${rb_there_is_in_fact_no_gplusplus_but_autoconf_is_cheating_us}"
+     ])
+ ])
+ 
+-AC_CHECK_LIB(crypt, crypt)      # glibc (GNU/Linux, GNU/Hurd, GNU/kFreeBSD)
++
+ AC_CHECK_LIB(dl, dlopen)	# Dynamic linking for SunOS/Solaris and SYSV
+ AC_CHECK_LIB(socket, shutdown)  # SunOS/Solaris
+ 
+@@ -3024,7 +3024,7 @@ AS_IF([test "$rb_cv_binary_elf" = yes], [
+   AC_CHECK_HEADERS([elf.h elf_abi.h])
+   AS_IF([test $ac_cv_header_elf_h = yes -o $ac_cv_header_elf_abi_h = yes], [
+     AC_LIBOBJ([addr2line])
+-    AC_CHECK_LIB([z], [uncompress])
++
+   ])
+ ])
+ 
+@@ -4224,6 +4224,7 @@ AS_IF([test "${universal_binary-no}" = yes ], [
+ 
+ [end]_group
+ 
++AC_CHECK_LIB(crypt, crypt) AC_CHECK_LIB(z, uncompress)
+ MAINLIBS="$LIBS"
+ LIBS=$ORIG_LIBS
+ AS_IF([test -n "${LIBS}"], [

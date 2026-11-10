@@ -1,0 +1,36 @@
+# Disables the forced replacement of `setjmp()`/`longjmp()` with `__builtin_setjmp()`/`__builtin_longjmp()` and the forced emulation of round() in Windows x86_64 builds.
+# Using `__builtin_setjmp()`/`__builtin_longjmp()` causes Ruby to crash in Windows x86_64 builds built with llvm-mingw, and round() usually exists.
+# Since Ruby 3.4, vm_core.h may include <setjmp.h> before <setjmpex.h>, which leaves the setjmpex() macro undefined, so vm_core.h now includes <setjmpex.h> when it is used.
+
+diff --git a/configure.ac b/configure.ac
+index 8b85d4d..aa12f74 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1253,10 +1253,10 @@ main()
+ 		ac_cv_func_malloc_usable_size=no
+ 		ac_cv_type_off_t=yes
+ 		ac_cv_sizeof_off_t=8
+-		AS_IF([test "$target_cpu" = x64], [
+-		    ac_cv_func___builtin_setjmp=yes
+-		    ac_cv_func_round=no
+-		])
++
++
++
++
+ 		ac_cv_func_tgamma=no
+ 		AC_CHECK_TYPE([NET_LUID], [], [],
+ 			      [@%:@include <winsock2.h>
+diff --git a/vm_core.h b/vm_core.h
+index 078479a..ff90942 100644
+--- a/vm_core.h
++++ b/vm_core.h
+@@ -104,6 +104,8 @@ extern int ruby_assert_critical_section_entered;
+ 
+ #if defined(__wasm__) && !defined(__EMSCRIPTEN__)
+ # include "wasm/setjmp.h"
++#elif defined RUBY_USE_SETJMPEX && RUBY_USE_SETJMPEX
++# include <setjmpex.h>
+ #else
+ # include <setjmp.h>
+ #endif

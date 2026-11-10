@@ -1,0 +1,29 @@
+# Prevents Ruby's build system from manually defining _WIN32_WINNT,
+# because it causes compilation errors if the Meson cross file we're using has also manually defined _WIN32_WINNT.
+
+diff --git a/configure.ac b/configure.ac
+index 1b36a96..8b85d4d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1045,7 +1045,7 @@ AC_ARG_WITH(winnt-ver,
+   [with_winnt_ver="$withval"], [with_winnt_ver="0x0600"])
+ AS_CASE(["$target_os"],
+ [mingw*], [
+-  RUBY_APPEND_OPTION(CPPFLAGS, -D_WIN32_WINNT=$with_winnt_ver)
++
+   RUBY_APPEND_OPTION(CPPFLAGS, -D__MINGW_USE_VC2005_COMPAT)
+ ])
+ 
+diff --git a/ext/socket/extconf.rb b/ext/socket/extconf.rb
+index bc5db8c..7bea7d4 100644
+--- a/ext/socket/extconf.rb
++++ b/ext/socket/extconf.rb
+@@ -535,7 +535,7 @@ def (fmt = "none").%(x)
+ 
+   if ipv6
+     if $mingw
+-      $CPPFLAGS << " -D_WIN32_WINNT=0x501" unless $CPPFLAGS.include?("_WIN32_WINNT")
++
+     end
+     ipv6lib = nil
+     class << (fmt = "unknown")
