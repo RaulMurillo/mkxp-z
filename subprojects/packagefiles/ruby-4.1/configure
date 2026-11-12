@@ -5684,9 +5684,15 @@ esac
 case "${target_os}" in #(
   cygwin*|msys*|mingw*|darwin*) :
 
+    # An explicit OBJCOPY is kept for the YJIT partial link on mingw
+    if test -z "$OBJCOPY"
+then :
+
     ac_ct_OBJCOPY=":"
     ac_cv_prog_OBJCOPY=":"
     ac_cv_prog_ac_ct_OBJCOPY=":"
+
+fi
  ;; #(
   *) :
      ;;
@@ -33379,10 +33385,12 @@ JIT_CARGO_SUPPORT=no
 case "${YJIT_SUPPORT}" in #(
   yes|dev|stats|dev_nodebug) :
 
-    case "$target_os" in #(
-  mingw*) :
+    case "$target_cpu-$target_os" in #(
+  x64-mingw*|x86_64-mingw*) :
+     ;; #(
+  *-mingw*) :
 
-        as_fn_error $? "YJIT is not supported on mingw. Use win32\configure.bat --enable-yjit on mswin instead" "$LINENO" 5
+        as_fn_error $? "YJIT on mingw is supported only on x86_64" "$LINENO" 5
      ;; #(
   *) :
      ;;
@@ -33682,6 +33690,11 @@ then :
 
         # Link libc++abi (which requires libpthread) for _Unwind_* functions needed by rust stdlib
         LDFLAGS="$LDFLAGS -lpthread -lc++abi"
+     ;; #(
+  mingw*) :
+
+        # Native libraries of the windows-gnu rust stdlib, plus its _Unwind_* functions
+        LIBS="$LIBS -lntdll -luserenv -ldbghelp -Wl,-Bstatic -lgcc_eh -Wl,-Bdynamic"
      ;; #(
   *) :
      ;;

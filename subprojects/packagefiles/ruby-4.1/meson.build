@@ -28,6 +28,40 @@ host_monitor = run_command(
 baseruby_command = (meson.version().version_compare('>=1.10.0') ? baseruby_program.cmd_array() : [baseruby_program]) + ['-r' + host_monitor]
 baseruby = run_command(quotetool, baseruby_command, check: true).stdout().strip()
 
+# YJIT is Rust; on Windows it is built for the MinGW target (x86_64-pc-windows-gnu).
+# ponytail: 'auto' only turns it on for Windows x86_64; elsewhere it stays opt-in.
+yjit_windows = host_machine.system() == 'windows' and host_machine.cpu_family() == 'x86_64'
+rustc = find_program('rustc', native: true, required: get_option('yjit'))
+yjit_rustc_flags = yjit_windows ? '--target=x86_64-pc-windows-gnu' : ''
+yjit = rustc.found() and (yjit_windows or get_option('yjit').enabled())
+if yjit and yjit_windows
+    rust_target_dir = run_command(rustc, yjit_rustc_flags, '--print', 'target-libdir', check: true).stdout().strip()
+    yjit = import('fs').is_dir(rust_target_dir)
+    if not yjit and get_option('yjit').enabled()
+        error('YJIT needs the Rust target: rustup target add x86_64-pc-windows-gnu')
+    endif
+endif
+yjit_options = ['--disable-yjit']
+yjit_ld = 'false'
+yjit_objcopy = 'false'
+yjit_env = {}
+yjit_libs = []
+if yjit
+    cc_cmd = meson.get_compiler('c').cmd_array()
+    yjit_options = ['--enable-yjit', 'RUSTC=' + rustc.full_path()]
+    # Partial link of libyjit.a into libruby, keeping only its rb_* symbols global.
+    yjit_ld = run_command(cc_cmd, '-print-prog-name=ld', check: true).stdout().strip()
+    yjit_objcopy = run_command(cc_cmd, '-print-prog-name=objcopy', check: true).stdout().strip()
+    yjit_env = {'rustc_flags': yjit_rustc_flags}
+    if host_machine.system() == 'windows'
+        foreach lib : ['ntdll', 'userenv', 'dbghelp']
+            yjit_libs += meson.get_compiler('c').find_library(lib, required: true)
+        endforeach
+        yjit_libs += meson.get_compiler('c').find_library('gcc_eh', static: true, required: true)
+    endif
+endif
+summary('YJIT', yjit)
+
 yaml_dep = dependency('yaml-0.1', required: true)
 ruby_deps = [yaml_dep, dependency('zlib', required: true)]
 yaml_options = []
@@ -65,9 +99,7 @@ ruby = declare_dependency(
                 '--disable-rubygems',
                 '--without-gmp',
                 '--enable-mkmf-verbose',
-                # ponytail: interpreter baseline; Windows YJIT needs MSVC, Rust and matching link integration.
-                # Upstream explicitly rejects YJIT on MinGW.
-                '--disable-yjit',
+                yjit_options,
                 '--disable-zjit',
                 yaml_options,
                 'CC=' + run_command(quotetool, meson.get_compiler('c').cmd_array(), check: true).stdout().strip(),
@@ -75,9 +107,9 @@ ruby = declare_dependency(
                 'AR=' + run_command(quotetool, common.get_variable('ar'), check: true).stdout().strip(),
                 'RANLIB=' + run_command(quotetool, common.get_variable('ranlib'), check: true).stdout().strip(),
                 'AS=false',
-                'LD=false',
+                'LD=' + yjit_ld,
                 'NM=false',
-                'OBJCOPY=false',
+                'OBJCOPY=' + yjit_objcopy,
                 'OBJDUMP=false',
                 'STRIP=false',
                 'CFLAGS=' + run_command(quotetool, cflags, check: true).stdout().strip() + ' ' + get_option('cflags'),
@@ -88,7 +120,7 @@ ruby = declare_dependency(
                 '--host=@HOST@',
                 '--host=' + common.get_variable('host_triplet'),
             ],
-            env: {
+            env: yjit_env + {
                 'CONFIG_SITE': ' ',
                 'MKXP_LIBGCC': meson.get_compiler('c').has_link_argument('-lgcc') ? '-lgcc' : '',
                 'MKXP_DISABLE_LTO_FOR_LINK_TESTS': (meson.get_compiler('c').get_linker_id().split('.')[-1] == 'lld' or meson.get_compiler('c').get_linker_id() == 'lld-link') and host_machine.cpu_family() == 'arm' ? 'yes' : 'no',
@@ -131,6 +163,7 @@ ruby = declare_dependency(
                 meson.get_compiler('c').find_library('bcrypt', required: true),
             ]
             : [],
+        yjit_libs,
         host_machine.system() == 'freebsd'
             ? [meson.get_compiler('c').find_library('procstat', required: true)]
             : [],
@@ -181,6 +214,10 @@ ruby = declare_dependency(
         meson.project_build_root() / 'build' / 'enc' / 'libenc.a',
         meson.project_build_root() / 'build' / 'enc' / 'libtrans.a',
         meson.project_build_root() / 'build' / 'libruby-static.a',
+        # rustc's raw-dylib import stubs, kept out of the partial link (defs/jit.mk)
+        yjit and yjit_windows
+            ? [meson.project_build_root() / 'build' / 'target' / 'release' / 'libyjit-imports.a']
+            : [],
     ],
 )
 

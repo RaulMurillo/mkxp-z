@@ -3,6 +3,10 @@
 # Excludes pre-unpacked bundled gem extensions as well as their installation.
 # ractor_check_ints and rb_w32_start_process no longer exist upstream.
 # Restores Ruby 3.4's legacy msvcrt.dll FILE/ioinfo layout in win32.c; Ruby 4 assumes UCRT.
+# Allows YJIT on x86_64 MinGW, linking the windows-gnu Rust stdlib's native libraries.
+# Keeps .refptr.rb_* global after the YJIT partial link (mingw COMDAT stubs) and drops .llvmbc.
+# Partially links only Rust objects on mingw: ld -r otherwise loses their .pdata/.xdata.
+# Moves rustc's raw-dylib import stubs to libyjit-imports.a: ld -r breaks their .idata.
 
 diff --git a/class.c b/class.c
 --- a/class.c
@@ -102,7 +106,20 @@ diff --git a/common.mk b/common.mk
 diff --git a/configure.ac b/configure.ac
 --- a/configure.ac
 +++ b/configure.ac
-@@ -473,7 +473,7 @@
+@@ -310,9 +310,12 @@
+ ])
+ AS_CASE(["${target_os}"],
+ [cygwin*|msys*|mingw*|darwin*], [
++    # An explicit OBJCOPY is kept for the YJIT partial link on mingw
++    AS_IF([test -z "$OBJCOPY"], [
+     ac_ct_OBJCOPY=":"
+     ac_cv_prog_OBJCOPY=":"
+     ac_cv_prog_ac_ct_OBJCOPY=":"
++    ])
+ ])
+ 
+ rb_test_CFLAGS=${CFLAGS+yes}
+@@ -473,7 +476,7 @@
  
  RUBY_PROG_GNU_LD
  RUBY_CPPOUTFILE
@@ -111,7 +128,7 @@ diff --git a/configure.ac b/configure.ac
  : ${OUTFLAG='-o '}
  : ${COUTFLAG=${OUTFLAG}}
  : ${CSRCFLAG=''}
-@@ -1127,7 +1127,7 @@
+@@ -1127,7 +1130,7 @@
    [with_winnt_ver="$withval"], [with_winnt_ver="0x0600"])
  AS_CASE(["$target_os"],
  [mingw*], [
@@ -120,7 +137,7 @@ diff --git a/configure.ac b/configure.ac
    RUBY_APPEND_OPTION(CPPFLAGS, -D__MINGW_USE_VC2005_COMPAT)
  ])
  
-@@ -1298,7 +1298,7 @@
+@@ -1298,7 +1301,7 @@
  		AC_CHECK_FUNCS(cygwin_conv_path)
  		AC_LIBOBJ([langinfo])
  		],
@@ -129,7 +146,7 @@ diff --git a/configure.ac b/configure.ac
  		ac_cv_header_pwd_h=no
  		ac_cv_header_utime_h=no
  		ac_cv_header_sys_ioctl_h=no
-@@ -1341,8 +1341,6 @@
+@@ -1341,8 +1344,6 @@
  		ac_cv_type_off_t=yes
  		ac_cv_sizeof_off_t=8
  		AS_IF([test "$target_cpu" = x64], [
@@ -138,7 +155,7 @@ diff --git a/configure.ac b/configure.ac
  		    ac_cv_func_tgamma=no
  		])
  		AC_CHECK_TYPE([NET_LUID], [], [],
-@@ -1421,7 +1419,6 @@
+@@ -1421,7 +1422,6 @@
      ])
  ])
  
@@ -146,7 +163,7 @@ diff --git a/configure.ac b/configure.ac
  AC_CHECK_LIB(dl, dlopen)	# Dynamic linking for SunOS/Solaris and SYSV
  AC_CHECK_LIB(socket, shutdown)  # SunOS/Solaris
  
-@@ -1626,7 +1623,7 @@
+@@ -1626,7 +1626,7 @@
  RUBY_CHECK_SIZEOF(time_t, [long "long long"], [], [@%:@include <time.h>])
  RUBY_CHECK_SIZEOF(clock_t, [], [], [@%:@include <time.h>])
  AC_SUBST(X_BUILTIN_BINARY, yes)
@@ -155,7 +172,7 @@ diff --git a/configure.ac b/configure.ac
  [dnl miniruby cannot run if cross compiling
      X_BUILTIN_BINARY=no
  ],
-@@ -3081,7 +3078,7 @@
+@@ -3081,7 +3081,7 @@
    AC_CHECK_HEADERS([elf.h elf_abi.h])
    AS_IF([test $ac_cv_header_elf_h = yes -o $ac_cv_header_elf_abi_h = yes], [
      AC_LIBOBJ([addr2line])
@@ -164,7 +181,7 @@ diff --git a/configure.ac b/configure.ac
    ])
  ])
  
-@@ -3192,7 +3189,7 @@
+@@ -3192,7 +3192,7 @@
  			: ${PRELOADENV=DYLD_INSERT_LIBRARIES}
                          AS_IF([test x"$enable_shared" = xyes], [
                              # Resolve symbols from libruby.dylib in $(LIBS) when --enable-shared
@@ -173,7 +190,7 @@ diff --git a/configure.ac b/configure.ac
                              # When building exts as bundles, a mach-o bundle needs to know its loader
                              # program to bind symbols from the ruby executable
                              EXTDLDFLAGS="-bundle_loader '\$(BUILTRUBY)'"
-@@ -3477,7 +3474,7 @@
+@@ -3477,7 +3477,7 @@
  done
  
  BTESTRUBY='$(MINIRUBY)'
@@ -182,7 +199,28 @@ diff --git a/configure.ac b/configure.ac
    test x"$MINIRUBY" = x && MINIRUBY="${RUBY-$BASERUBY} -I${ac_abs_builddir-.} "-r'$(arch)-fake'
    XRUBY_LIBDIR=`${RUBY-$BASERUBY} -rrbconfig -e ['puts RbConfig::CONFIG["libdir"]']`
    XRUBY_RUBYLIBDIR=`${RUBY-$BASERUBY} -rrbconfig -e ['puts RbConfig::CONFIG["rubylibdir"]']`
-@@ -4204,7 +4201,7 @@
+@@ -3952,8 +3952,8 @@
+ JIT_CARGO_SUPPORT=no
+ AS_CASE(["${YJIT_SUPPORT}"],
+ [yes|dev|stats|dev_nodebug], [
+-    AS_CASE(["$target_os"], [mingw*], [
+-        AC_MSG_ERROR([YJIT is not supported on mingw. Use win32\configure.bat --enable-yjit on mswin instead])
++    AS_CASE(["$target_cpu-$target_os"], [x64-mingw*|x86_64-mingw*], [], [*-mingw*], [
++        AC_MSG_ERROR([YJIT on mingw is supported only on x86_64])
+     ])
+     AS_IF([test x"$RUSTC" = "xno"],
+         AC_MSG_ERROR([rustc is required. Installation instructions available at https://www.rust-lang.org/tools/install])
+@@ -4079,6 +4079,9 @@
+     AS_CASE(["$target_os"],[openbsd*],[
+         # Link libc++abi (which requires libpthread) for _Unwind_* functions needed by rust stdlib
+         LDFLAGS="$LDFLAGS -lpthread -lc++abi"
++    ],[mingw*],[
++        # Native libraries of the windows-gnu rust stdlib, plus its _Unwind_* functions
++        LIBS="$LIBS -lntdll -luserenv -ldbghelp -Wl,-Bstatic -lgcc_eh -Wl,-Bdynamic"
+     ])
+ 
+     # absolute path to stop the "target" dir in src dir from interfering through VPATH
+@@ -4204,7 +4207,7 @@
  	], [
  	    LIBRUBY_SO=dummy
  	    LIBRUBY='lib$(RUBY_SO_NAME).a'
@@ -191,7 +229,7 @@ diff --git a/configure.ac b/configure.ac
  	])
  	],
      [wasi*], [
-@@ -4284,6 +4281,7 @@
+@@ -4284,6 +4287,7 @@
  
  [end]_group
  
@@ -246,6 +284,47 @@ diff --git a/cygwin/GNUmakefile.in b/cygwin/GNUmakefile.in
  
  clean-local::
  	@$(RM) $(RUBYDEF)
+diff --git a/defs/jit.mk b/defs/jit.mk
+--- a/defs/jit.mk
++++ b/defs/jit.mk
+@@ -65,13 +65,36 @@
+ endif # ifneq ($(JIT_CARGO_SUPPORT),no)
+ 
+ RUST_LIB_SYMBOLS = $(RUST_LIB:.a=).symbols
++ifneq ($(findstring mingw,$(target_os)),)
++RUST_LIB_IMPORTS = $(RUST_LIB:.a=-imports.a)
++MAINLIBS += $(RUST_LIB_IMPORTS)
++endif
+ $(RUST_LIBOBJ): $(RUST_LIB)
+ 	$(ECHO) 'partial linking $(RUST_LIB) into $@'
+ ifneq ($(findstring darwin,$(target_os)),)
+ 	$(Q) $(CC) -nodefaultlibs -r -o $@ -exported_symbols_list $(RUST_LIB_SYMBOLS) $(RUST_LIB)
+ else
++ifneq ($(findstring mingw,$(target_os)),)
++# mingw: binutils' ld -r drops the Rust .pdata/.xdata (SEH unwind info) once the
++# GCC-built compiler-rt objects are mixed in. Rust does not use them; libgcc
++# provides the same functions. Keep the Rust codegen units.
++# rustc's raw-dylib import stubs (*.dll[hst]*.o) go to $(RUST_LIB_IMPORTS):
++# ld -r merges their .idata sections into empty import descriptors.
++	$(Q) cp $(RUST_LIB) $@.a
++	$(Q) $(AR) d $@.a `$(AR) t $@.a | grep -v -e '\.rcgu\.o$$' -e '\.dll'`
++	$(Q) $(RM) -r $@.imp $(RUST_LIB_IMPORTS) && mkdir $@.imp && cd $@.imp && \
++	    stubs=`$(AR) t $@.a | grep '\.dll'` && $(AR) x $@.a $$stubs && \
++	    $(AR) d $@.a $$stubs && $(AR) rcs $(RUST_LIB_IMPORTS) $$stubs
++	$(Q) $(RM) -r $@.imp
++	$(Q) $(LD) -r -o $@ --whole-archive $@.a
++	$(Q) $(RM) $@.a
++else
+ 	$(Q) $(LD) -r -o $@ --whole-archive $(RUST_LIB)
+-	-$(Q) $(OBJCOPY) --wildcard --keep-global-symbol='$(SYMBOL_PREFIX)rb_*' $(@)
++endif
++# mingw: .refptr.rb_* are COMDAT stubs shared with the C objects; keep them global.
++# Drop the Rust stdlib's embedded bitcode: on PE it is mapped far above the image.
++	-$(Q) $(OBJCOPY) --wildcard --keep-global-symbol='$(SYMBOL_PREFIX)rb_*' --keep-global-symbol='.refptr.$(SYMBOL_PREFIX)rb_*' \
++		--remove-section=.llvmbc --remove-section=.llvmcmd $(@)
+ endif
+ 
+ rust-libobj: $(RUST_LIBOBJ)
 diff --git a/ext/-test-/RUBY_ALIGNOF/c.c b/ext/-test-/RUBY_ALIGNOF/c.c
 --- a/ext/-test-/RUBY_ALIGNOF/c.c
 +++ b/ext/-test-/RUBY_ALIGNOF/c.c

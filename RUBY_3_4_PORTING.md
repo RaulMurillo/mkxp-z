@@ -319,8 +319,9 @@ esas rutas. No incluye otros archivos sin seguimiento.
   probado en el juego: el exportador de mapas usa `Dir.exists?` y las
   operaciones `CFG[]` y `CFG[]=` llaman a `File.exists?` desde el binding.
   `CFG.to_hash`, que utiliza el profiler, sigue otra ruta.
-- YJIT está desactivado en las candidatas Windows; en Ruby 3.4 tampoco se
-  compiló RJIT. No atribuirles mejoras.
+- YJIT está desactivado en las candidatas Windows de 3.4 (tampoco se
+  compiló RJIT). En 4.1 está disponible en la rama `deps/ruby-4.1` y
+  requiere `YJITEnable`. No atribuir mejoras sin medir.
 
 Respaldar las partidas **fuera de las carpetas candidatas**: dos copias del
 juego pueden usar la misma ubicación externa de guardado.
@@ -504,24 +505,104 @@ SHA-256: fb530bb88e90de3ae91c1310a27ae090e6bd989b8726de50ef12a890a85b88ef
   `-O3`, LTO y Ruby estático. También conserva `stack_protector=no` del
   control 3.4 para no añadir `libssp-0.dll`; no es una mejora de seguridad.
 
-### YJIT: soporte de Windows no equivale a soporte de MinGW
+### YJIT en Windows con MinGW (rama `deps/ruby-4.1`)
 
 El [anuncio oficial de Ruby 4.1.0-preview1](https://www.ruby-lang.org/en/news/2026/10/12/ruby-4-1-0-preview1-released/)
-anuncia YJIT para Windows. La fuente de esta versión, en `configure.ac`,
-rechaza explícitamente habilitarlo en MinGW:
+anuncia YJIT para Windows, pero solo con mswin (`win32/Makefile.sub`, DLL,
+`--target=x86_64-pc-windows-msvc`). `configure.ac` rechaza MinGW:
 
 ```text
 YJIT is not supported on mingw. Use win32\configure.bat --enable-yjit on mswin instead
 ```
 
-Este port pasa `--disable-yjit --disable-zjit` explícitamente. Instalar Rust
-o activar `YJITEnable` no resuelve esa incompatibilidad. No se ha eliminado
-la comprobación upstream ni se ha cambiado silenciosamente a MSVC.
+El rechazo es de integración, no de código: la parte C de YJIT (`yjit.c`,
+`jit.c`) usa `_WIN32` y la parte Rust usa `cfg(windows)`, que también cubren
+MinGW y el destino Rust `x86_64-pc-windows-gnu` (ABI Win64, `VirtualAlloc`,
+unwind info registrada con `RtlAddFunctionTable` para el `longjmp` de
+`setjmpex`). Cambios de esta rama:
 
-Una candidata Windows con YJIT necesita otra integración: MSVC, Rust para
-el destino correspondiente, dependencias con CRT/ABI compatibles y enlace
-de los archivos del JIT. También habría que revisar que el código generado
-por YJIT respete los cambios de semántica del VM propios de MKXP-Z.
+- `ruby-4.1-mkxp.patch` (`configure.ac`, `configure` regenerado con Autoconf
+  2.71): permite YJIT en MinGW x86_64 y, cuando se enlaza Rust, añade a
+  `LIBS` `-lntdll -luserenv -ldbghelp` (bibliotecas nativas de la stdlib Rust
+  `windows-gnu`, según `rustc --print native-static-libs`) y `libgcc_eh`
+  estática (`_Unwind_*` del panic de Rust). En MinGW upstream fuerza
+  `OBJCOPY=:`; ahora respeta un `OBJCOPY` explícito, sin el cual el enlace
+  parcial no localiza los símbolos de Rust y `lgamma_r` de
+  `compiler-builtins` choca con `missing/lgamma_r.c`.
+- `defs/jit.mk` (mismo parche): el `objcopy` del enlace parcial también deja
+  globales `.refptr.rb_*`. Son stubs COMDAT de MinGW compartidos con los
+  objetos C; si el enlazador elige la copia de Rust ya localizada, quedan
+  2221 referencias `.refptr.rb_*` sin resolver. Además elimina `.llvmbc` y
+  `.llvmcmd` (bitcode de la stdlib Rust precompilada): en PE quedaba mapeada
+  en `0x200000000`, `SizeOfImage` subía a ~3 GiB y Windows rechazaba el EXE
+  con "Acceso denegado". `update_mkxp.sh` rechaza ahora `SizeOfImage` > 1 GiB.
+- `defs/jit.mk`, enlace parcial en MinGW: antes de `ld -r` se quedan en la
+  copia de `libyjit.a` solo los miembros `.rcgu.o` (`ld -r` sobre el archivo
+  completo perdía `.pdata`/`.xdata`). Los stubs de importación `raw-dylib`
+  que genera rustc (`*.dllh.o`, `*.dllsNNNNN.o`, `*.dllt.o`, estilo dlltool)
+  se extraen a `target/release/libyjit-imports.a` y se enlazan aparte
+  (`MAINLIBS` de Ruby y `link_args` de MKXP-Z). Mezclados en `ld -r`, sus
+  secciones `.idata$N` se fusionan y las tablas de importación de
+  `api-ms-win-core-synch-l1-2-0.dll` y `bcryptprimitives.dll` quedaban sin
+  funciones: `WaitOnAddress`/`ProcessPrng` apuntaban a basura y el EXE se
+  cerraba en silencio en la primera llamada Rust.
+- `packagefiles/ruby-4.1/meson.build`: opción `yjit` (feature, `auto`). En
+  Windows x86_64 se activa si encuentra `rustc` con el destino
+  `x86_64-pc-windows-gnu`; en otras plataformas solo con `enabled`. Pasa
+  `--enable-yjit`, `RUSTC`, `rustc_flags=--target=x86_64-pc-windows-gnu` y
+  el `ld`/`objcopy` de MinGW, que el enlace parcial de upstream usa para
+  meter `libyjit.a` en `libruby-static.a` dejando globales solo `rb_*`.
+  Añade las mismas bibliotecas al enlace de MKXP-Z.
+
+Requisitos de compilación (en el host Linux de cross-compilación):
+
+```bash
+curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --target x86_64-pc-windows-gnu
+PATH=$HOME/.cargo/bin:$PATH bash update_mkxp.sh --ruby 4.1 --reconfigure --build-only
+```
+
+Sin `rustc` en el `PATH` o sin el destino, `auto` compila sin YJIT (Meson lo
+muestra en `summary`). `-Druby-4.1:yjit=disabled` fuerza el intérprete y
+`=enabled` convierte la ausencia de Rust en error.
+
+**Activación en tiempo de ejecución:** compilar YJIT no lo activa. En
+`mkxp.json` usar `"YJITEnable": true` (el binding pasa `--yjit` a
+`ruby_options`). No usar `JITEnable`: pasa opciones `--mjit*` que Ruby 4 ya
+no reconoce. El mismo EXE sirve de control (YJIT apagado) y de candidata.
+
+**Semántica de MKXP-Z con YJIT (revisado en `yjit/src/codegen.rs`):** las
+llamadas a métodos privados con receptor explícito no se compilan
+(`send_private_not_fcall`) y las protegidas fallan el guard
+(`guard_send_se_protected_check_failed`): ambas vuelven al intérprete
+parcheado, así que conservan el bypass de visibilidad pero no se aceleran.
+`defineclass` (superclass mismatch) y los bloques `Symbol#to_proc`
+(`invokeblock_symbol`) tampoco se compilan. `send` marca `FCALL` igual que
+el intérprete. No se ha modificado YJIT.
+
+**Límites:**
+
+- La stdlib Rust actual requiere Windows 10 o posterior; el EXE con YJIT
+  enlazado no admite Windows 7/8 aunque YJIT esté apagado.
+- Combinación no soportada por upstream (MinGW + YJIT): sin pruebas de
+  `test_yjit.rb` en Windows. Un fallo de YJIT suele terminar en `rb_bug`
+  (cierre con volcado en stderr), no en `errorlog.txt`.
+- ZJIT sigue desactivado.
+- `libyjit.o` solo depende de `libyjit.a`: tras cambiar `OBJCOPY` o
+  `jit.mk` en un build existente hay que borrarlo para que se regenere, y
+  borrar también `mkxp-z.x86_64.exe`: Ninja no reenlaza al cambiar
+  `libruby-static.a`.
+
+**Resultado de compilación (rustc 1.99.1, sin ejecutar):** EXE
+`bf57cb0e135e339e349d20702004fa204d354f108b42a37b666f391d346717f2`
+(`SizeOfImage` 0x2a4d000, sin `.llvmbc`),
+copiado con su stdlib en `ruby41-yjit-candidate/` del directorio de build.
+`libyjit.o` exporta solo 51 `rb_*` y 25 `.refptr.rb_*`. El EXE contiene las
+opciones `--yjit*` y mantiene `__pioinfo` de `msvcrt.dll`. Importaciones
+nuevas frente al intérprete: `bcryptprimitives.dll` (`ProcessPrng`) y
+`api-ms-win-core-synch-l1-2-0.dll` (`WaitOnAddress`, `WakeByAddressAll`,
+`WakeByAddressSingle`), comprobadas con `objdump -p`; ambas del sistema en
+Windows 10+. `update_mkxp.sh` añade `bcryptprimitives` a su lista de DLL
+del sistema.
 
 ### Compilar sin ejecutar ni preparar una copia del juego
 
@@ -533,10 +614,15 @@ meson setup "$BUILD" . \
   --prefix "$BUILD/artifact" \
   --cross-file windows/meson-gcc-x86_64.txt \
   --buildtype release -Dstrip=true -Db_lto=true \
-  -Dmri_version=4.1 -Ddefault_system=disabled
+  -Dmri_version=4.1 -Ddefault_system=disabled \
+  -Druby-4.1:yjit=enabled
 MESON_NUM_PROCESSES=2 meson compile -C "$BUILD" -j 2
 meson install -C "$BUILD" --no-rebuild --tags mkxp-z
 ```
+
+Este comando requiere `rustc` en el `PATH` y su destino
+`x86_64-pc-windows-gnu`; falla si no están disponibles. Para un control sin
+soporte YJIT, usar otro directorio de build y `-Druby-4.1:yjit=disabled`.
 
 La instalación de Meson se limita al prefijo externo. El helper del
 repositorio padre también permite compilar sin preparar una copia del juego:
@@ -631,7 +717,18 @@ Notas para depurar arranques:
 
 **Hechos:** actualizar el intérprete cambia VM, GC y bibliotecas. El
 anuncio y la fuente describen mejoras del GC; no son mediciones de
-Essentials. Esta build no incorpora YJIT.
+Essentials. La rama `deps/ruby-4.1` permite compilar con YJIT, apagado en
+ejecución salvo `YJITEnable`.
+
+El usuario confirmó el arranque en Windows con YJIT apagado y encendido.
+En los reportes del 12 de noviembre de 2026, la media de dos sumas de
+medianas fue 1250,5 ms con Ruby 3.1, 1599,1 ms con 4.1 sin soporte YJIT,
+1547,1 ms con soporte YJIT apagado y 744,8 ms con YJIT activo. La mejora
+del benchmark no implica una mejora equivalente de FPS: algunas ventanas
+con YJIT registraron menos tiempo entre updates pero más dentro de
+`Graphics.update`. Hubo una sesión por configuración, diferencias de
+recorrido y estado, y dos benchmarks por sesión; no es una comparación
+controlada suficiente para atribuir la causa del cambio de FPS.
 
 **Hipótesis:** un JIT soportado podría acelerar bucles Ruby calientes.
 Las llamadas frecuentes a C++, las transferencias GPU, esperas, audio y
@@ -642,12 +739,14 @@ relevantes como advertencia, no como pronóstico de 4.1.
 **Pendiente de prueba manual por el usuario**, en una copia separada y con
 backup independiente de las partidas externas:
 
-1. Confirmar `RUBY_DESCRIPTION`, stdlib y ausencia de JIT; revisar los logs.
+1. Confirmar `RUBY_DESCRIPTION`, stdlib y estado esperado de YJIT; revisar los logs.
 2. Cargar partida, recorrer mapas y eventos, abrir menús y entrar en combate.
 3. Comprobar gráficos, audio, plugins, dependencias Ruby y extensiones nativas.
 4. Guardar y recargar la copia de prueba; comprobar compatibilidad de Marshal.
 5. Alternar control 3.4 y candidata 4.1 desde los mismos datos, configuración
    y estado inicial. Registrar calentamiento, medianas, dispersión y memoria.
+6. Con la candidata YJIT, repetir con `YJITEnable` falso y verdadero;
+   comprobar `RubyVM::YJIT.enabled?` y vigilar memoria y cierres `rb_bug`.
 
 Compilar e inspeccionar un PE no demuestra compatibilidad funcional ni
 mejora de FPS. Para volver al control de fuentes, conservar primero el
